@@ -57,18 +57,27 @@ fn main() {
         for m1 in &keys {
             for m2 in &keys {
                 let m = dot(m1, m2);
-                added = push(&mut map, m);
+                added = added || push(&mut map, m);
             }
         }
         if !added {
             break;
         }
     }
+
     dbg!(map.len());
+    dbg!(map.len() / 4);
 }
 
 fn id() -> Matrix {
     Array2::from_diag_elem(2, 1.into()) * 2
+}
+
+fn sy() -> Matrix {
+    arr2(&[
+        [Complex::new(1, 1), Complex::new(-1, -1)],
+        [Complex::new(1, 1), Complex::new(1, 1)],
+    ])
 }
 
 fn sz() -> Matrix {
