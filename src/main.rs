@@ -57,6 +57,8 @@ macro_rules! c {
     };
 }
 
+const ARR: [Complex<i8>; 4] = [c!(1), c!(-1), c!(i), c!(-i)];
+
 fn dot(a: &Matrix, b: &Matrix) -> Matrix {
     let mul = a.dot(b);
     debug_assert!(mul
@@ -67,8 +69,9 @@ fn dot(a: &Matrix, b: &Matrix) -> Matrix {
 }
 
 fn push(map: &mut HashMap<Matrix, usize>, key: &Matrix) -> bool {
-    // TODO canonicalization
-    if !map.contains_key(key) {
+    let mut variants = variants(key);
+    let contains_variant = variants.any(|k| map.contains_key(&k));
+    if !contains_variant {
         let id = map.len();
         map.insert(key.clone(), id);
         true
@@ -77,8 +80,41 @@ fn push(map: &mut HashMap<Matrix, usize>, key: &Matrix) -> bool {
     }
 }
 
+fn variants(key: &Matrix) -> impl Iterator<Item = Matrix> {
+    let key = key.clone();
+    let variants = ARR.iter().map(move |s| key.map(|c| c * s));
+    variants
+}
+
 fn main() {
-    let originals = vec![sz1(), sx1(), sz2(), sx2(), cnot()];
+    let map = generate_map();
+    let lut = generate_lut(&map);
+    eprintln!("Done!");
+}
+
+fn generate_lut(map: &HashMap<Matrix, usize>) -> Array2<u16> {
+    let len = map.len();
+    let mut keys: Vec<_> = map.keys().collect();
+    keys.sort_by_key(|m| map.get(m).unwrap());
+
+    let lut = Array2::from_shape_fn((len, len), |(i, j)| {
+        let m = dot(keys[i], keys[j]);
+        let id = variants(&m).map(|m| map.get(&m)).find_map(|m| m).unwrap();
+        *id as u16
+    });
+
+    lut
+}
+
+fn generate_map() -> HashMap<Matrix, usize> {
+    let originals = vec![
+        sz1(),
+        sx1(),
+        sz2(),
+        sx2(),
+        cnot(),
+        // f
+    ];
 
     let mut map = HashMap::new();
     for m in &originals {
@@ -107,6 +143,7 @@ fn main() {
 
     dbg!(map.len());
     dbg!(map.len() / 4);
+    map
 }
 
 fn id() -> Matrix {
