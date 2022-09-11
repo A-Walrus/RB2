@@ -27,6 +27,36 @@ type Matrix = Array2<Complex<i8>>;
 //  1+i, 1-i
 //  1-i, 1+i  1/2
 
+macro_rules! c {
+    (0) => {
+        Complex::new(0, 0)
+    };
+    (i) => {
+        Complex::new(0, 1)
+    };
+    (-i) => {
+        Complex::new(0, -1)
+    };
+    ($real:literal + i) => {
+        Complex::new($real, 1)
+    };
+    ($real:literal - i) => {
+        Complex::new($real, -1)
+    };
+    ($imag:literal i) => {
+        Complex::new(0, $imag)
+    };
+    ($real:literal + $imag:literal i) => {
+        Complex::new($real, $imag)
+    };
+    ($real:literal - $imag:literal i) => {
+        Complex::new($real, -$imag)
+    };
+    ($real:literal) => {
+        Complex::new($real, 0)
+    };
+}
+
 fn dot(a: &Matrix, b: &Matrix) -> Matrix {
     let mul = a.dot(b);
     debug_assert!(mul
@@ -36,10 +66,11 @@ fn dot(a: &Matrix, b: &Matrix) -> Matrix {
     mul / 2
 }
 
-fn push(map: &mut HashMap<Matrix, usize>, key: Matrix) -> bool {
-    if !map.contains_key(&key) {
+fn push(map: &mut HashMap<Matrix, usize>, key: &Matrix) -> bool {
+    // TODO canonicalization
+    if !map.contains_key(key) {
         let id = map.len();
-        map.insert(key, id);
+        map.insert(key.clone(), id);
         true
     } else {
         false
@@ -47,22 +78,31 @@ fn push(map: &mut HashMap<Matrix, usize>, key: Matrix) -> bool {
 }
 
 fn main() {
-    let mut map = HashMap::new();
-    push(&mut map, sz());
-    push(&mut map, sx());
+    let originals = vec![sz1(), sx1(), sz2(), sx2(), cnot()];
 
+    let mut map = HashMap::new();
+    for m in &originals {
+        push(&mut map, m);
+    }
+
+    let mut new: Vec<_> = map.keys().cloned().collect();
+    let mut newer: Vec<_> = Vec::new();
     loop {
-        let mut added = false;
-        let keys: Vec<Matrix> = map.keys().cloned().collect();
-        for m1 in &keys {
-            for m2 in &keys {
+        dbg!(map.len(), new.len(), newer.len());
+        dbg!();
+        for m1 in &new {
+            for m2 in &originals {
                 let m = dot(m1, m2);
-                added = added || push(&mut map, m);
+                if push(&mut map, &m) {
+                    newer.push(m);
+                }
             }
         }
-        if !added {
+        if newer.is_empty() {
             break;
         }
+        std::mem::swap(&mut new, &mut newer);
+        newer.clear();
     }
 
     dbg!(map.len());
@@ -70,57 +110,50 @@ fn main() {
 }
 
 fn id() -> Matrix {
-    Array2::from_diag_elem(2, 1.into()) * 2
+    Array2::from_diag_elem(4, 1.into()) * 2
 }
 
-fn sy() -> Matrix {
+fn sz1() -> Matrix {
     arr2(&[
-        [Complex::new(1, 1), Complex::new(-1, -1)],
-        [Complex::new(1, 1), Complex::new(1, 1)],
+        [c!(1), c!(0), c!(0), c!(0)],
+        [c!(0), c!(i), c!(0), c!(0)],
+        [c!(0), c!(0), c!(1), c!(0)],
+        [c!(0), c!(0), c!(0), c!(i)],
+    ]) * 2
+}
+
+fn sx1() -> Matrix {
+    arr2(&[
+        [c!(1 + i), c!(1 - i), c!(0), c!(0)],
+        [c!(1 - i), c!(1 + i), c!(0), c!(0)],
+        [c!(0), c!(0), c!(1 + i), c!(1 - i)],
+        [c!(0), c!(0), c!(1 - i), c!(1 + i)],
     ])
 }
 
-fn sz() -> Matrix {
+fn sx2() -> Matrix {
     arr2(&[
-        [Complex::new(1, 0), Complex::new(0, 0)],
-        [Complex::new(0, 0), Complex::new(0, 1)],
-    ]) * 2
-}
-
-fn sx() -> Matrix {
-    arr2(&[
-        [Complex::new(1, 1), Complex::new(1, -1)],
-        [Complex::new(1, -1), Complex::new(1, 1)],
+        [c!(1 + i), c!(0), c!(1 - i), c!(0)],
+        [c!(0), c!(1 + i), c!(0), c!(1 - i)],
+        [c!(1 - i), c!(0), c!(1 + i), c!(0)],
+        [c!(0), c!(1 - i), c!(0), c!(1 + i)],
     ])
 }
 
-fn x() -> Matrix {
+fn sz2() -> Matrix {
     arr2(&[
-        [Complex::new(0, 0), Complex::new(1, 0)],
-        [Complex::new(1, 0), Complex::new(0, 0)],
+        [c!(1), c!(0), c!(0), c!(0)],
+        [c!(0), c!(1), c!(0), c!(0)],
+        [c!(0), c!(0), c!(i), c!(0)],
+        [c!(0), c!(0), c!(0), c!(i)],
     ]) * 2
 }
 
-fn z() -> Matrix {
+fn cnot() -> Matrix {
     arr2(&[
-        [Complex::new(1, 0), Complex::new(0, 0)],
-        [Complex::new(0, 0), Complex::new(-1, 0)],
+        [c!(1), c!(0), c!(0), c!(0)],
+        [c!(0), c!(1), c!(0), c!(0)],
+        [c!(0), c!(0), c!(0), c!(1)],
+        [c!(0), c!(0), c!(1), c!(0)],
     ]) * 2
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    #[test]
-    fn id_check() {
-        let id = id();
-        let sz = sz();
-        let sx = sx();
-        let x = x();
-        assert_eq!(dot(&id, &id), id);
-        assert_eq!(dot(&x, &x), id);
-        assert_eq!(dot(&sx, &sx), x);
-        assert_eq!(dot(&dot(&dot(&sx, &sx), &sx), &sx), id);
-        assert_eq!(dot(&dot(&dot(&sz, &sz), &sz), &sz), id);
-    }
 }
