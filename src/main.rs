@@ -109,22 +109,19 @@ fn push(map: &mut HashMap<Matrix, usize>, key: &Matrix) -> bool {
     }
 }
 
-fn test_lut(lut: &Array2<u16>) {
+const AMOUNT: usize = 1000;
+fn test_lut(lut: &Array2<u16>, arr: &mut [usize]) -> usize {
     let mut rng = thread_rng();
     let len = lut.len_of(Axis(0));
     let iterator = std::iter::repeat_with(|| rng.gen_range(0..len));
-    const AMOUNT: usize = 1000;
-
-    let now = Instant::now();
 
     let mut state: usize = 0;
-    for rand in iterator.take(AMOUNT) {
+    for (rand, a) in iterator.take(AMOUNT).zip(arr.iter_mut()) {
+        *a = rand;
         state = *(lut.get((state as usize, rand as usize)).unwrap()) as usize;
     }
 
-    let elapsed_time = now.elapsed();
-    println!("Final state {}", state);
-    println!("Running {} iterations, took {:?}", AMOUNT, elapsed_time);
+    state
 }
 
 const PATH: &str = "lut";
@@ -164,10 +161,38 @@ fn get_lut() -> Array2<u16> {
 }
 
 fn main() {
+    const ITERATIONS: u32 = 1000;
+
+    let mut args = std::env::args();
+    // skip name
+    args.next();
+    let threads: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+
     let lut = get_lut();
     eprintln!("Generated lookup table");
 
-    test_lut(&lut);
+    let mut randoms = vec![0; threads * AMOUNT];
+
+    let now = Instant::now();
+    for _ in 0..ITERATIONS {
+        let mut slice = randoms.as_mut_slice();
+        std::thread::scope(|s| {
+            for _ in 0..threads {
+                let (start, rest) = slice.split_at_mut(AMOUNT);
+                slice = rest;
+                s.spawn(|| test_lut(&lut, start));
+            }
+        });
+    }
+    let elapsed_time = now.elapsed();
+
+    dbg!(randoms);
+    println!(
+        "Running {} iterations on {}, took {:?}",
+        AMOUNT,
+        threads,
+        elapsed_time / ITERATIONS
+    );
 }
 
 fn generate_lut() -> Array2<u16> {
