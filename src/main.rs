@@ -6,32 +6,41 @@ use std::{
 };
 
 use ndarray::prelude::*;
+use ndarray_rand::{rand_distr::Uniform, RandomExt};
 use num_complex::Complex;
-use rand::prelude::*;
+
+fn main() -> io::Result<()> {
+    const REPETITIONS: u32 = 10; // in python version called n
+
+    const THREADS: usize = 1000;
+    const ITERATIONS: usize = 100;
+    const N: usize = 11520;
+
+    let lut = get_lut();
+
+    let start = Instant::now();
+    for _ in 0..REPETITIONS {
+        let randoms = Array::random((ITERATIONS, THREADS), Uniform::new(0, N)); // in python version called c
+        let mut states: Vec<usize> = vec![0; THREADS]; // in python version called s
+
+        for row in randoms.axis_iter(Axis(0)) {
+            for (state, change) in states.iter_mut().zip(row) {
+                *state = *(lut.get((*state, *change)).unwrap()) as usize;
+            }
+        }
+    }
+
+    let elapsed = Instant::now() - start;
+
+    println!(
+        "Execution time is {} ns per Clifford",
+        (elapsed / REPETITIONS / THREADS as u32 / ITERATIONS as u32).as_nanos()
+    );
+
+    Ok(())
+}
 
 type Matrix = Array2<Complex<i8>>;
-// I
-//  1,  0
-//  0,  1
-// X
-//  0, 1
-//  1, 0
-// Y
-//  0,-i
-//  i, 0
-// Z
-//  1,  0
-//  0, -1
-// z
-//  1, 0
-//  0, i
-
-// z
-//  1, 0
-//  0, i
-// x
-//  1+i, 1-i
-//  1-i, 1+i  1/2
 
 macro_rules! c {
     (0) => {
@@ -69,7 +78,7 @@ fn calc_offset(m: &Matrix) -> usize {
     let mut first_non_zero = *m
         .iter()
         .find(|c| **c != c!(0))
-        .expect("There should be atleat one non-zero value in Matrix");
+        .expect("There should be at least one non-zero value in Matrix");
     let mut count = 0;
     while !(first_non_zero.re >= 0 && first_non_zero.im > 0) {
         first_non_zero *= c!(i);
@@ -103,21 +112,6 @@ fn push(map: &mut HashMap<Matrix, usize>, key: &Matrix) -> bool {
     } else {
         false
     }
-}
-
-const AMOUNT: usize = 1000;
-fn test_lut(lut: &Array2<u16>, arr: &mut [usize]) -> usize {
-    let mut rng = thread_rng();
-    let len = lut.len_of(Axis(0));
-    let iterator = std::iter::repeat_with(|| rng.gen_range(0..len));
-
-    let mut state: usize = 0;
-    for (rand, a) in iterator.take(AMOUNT).zip(arr.iter_mut()) {
-        *a = rand;
-        state = *(lut.get((state as usize, rand as usize)).unwrap()) as usize;
-    }
-
-    state
 }
 
 const PATH: &str = "lut";
@@ -154,45 +148,6 @@ fn get_lut() -> Array2<u16> {
             lut
         }
     }
-}
-
-fn main() -> io::Result<()> {
-    const ITERATIONS: u32 = 1000;
-
-    let mut results = File::create("results.csv")?;
-
-    for threads in 1..=10 {
-        let lut = get_lut();
-        eprintln!("Generated lookup table");
-
-        let mut randoms = vec![0; threads * AMOUNT];
-
-        let now = Instant::now();
-        for _ in 0..ITERATIONS {
-            let mut slice = randoms.as_mut_slice();
-            std::thread::scope(|s| {
-                for _ in 0..threads {
-                    let (start, rest) = slice.split_at_mut(AMOUNT);
-                    slice = rest;
-                    s.spawn(|| test_lut(&lut, start));
-                }
-            });
-        }
-        let elapsed_time = now.elapsed();
-
-        dbg!(randoms);
-        println!(
-            "Running {} iterations on {}, took {:?}",
-            AMOUNT,
-            threads,
-            elapsed_time / ITERATIONS
-        );
-        results.write_all(
-            format!("{}\t{}\n", threads, (elapsed_time / ITERATIONS).as_nanos()).as_bytes(),
-        )?;
-    }
-
-    Ok(())
 }
 
 fn generate_lut() -> Array2<u16> {
