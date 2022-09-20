@@ -160,39 +160,43 @@ fn get_lut() -> Array2<u16> {
     }
 }
 
-fn main() {
+fn main() -> io::Result<()> {
     const ITERATIONS: u32 = 1000;
 
-    let mut args = std::env::args();
-    // skip name
-    args.next();
-    let threads: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+    let mut results = File::create("results.csv")?;
 
-    let lut = get_lut();
-    eprintln!("Generated lookup table");
+    for threads in 1..=10 {
+        let lut = get_lut();
+        eprintln!("Generated lookup table");
 
-    let mut randoms = vec![0; threads * AMOUNT];
+        let mut randoms = vec![0; threads * AMOUNT];
 
-    let now = Instant::now();
-    for _ in 0..ITERATIONS {
-        let mut slice = randoms.as_mut_slice();
-        std::thread::scope(|s| {
-            for _ in 0..threads {
-                let (start, rest) = slice.split_at_mut(AMOUNT);
-                slice = rest;
-                s.spawn(|| test_lut(&lut, start));
-            }
-        });
+        let now = Instant::now();
+        for _ in 0..ITERATIONS {
+            let mut slice = randoms.as_mut_slice();
+            std::thread::scope(|s| {
+                for _ in 0..threads {
+                    let (start, rest) = slice.split_at_mut(AMOUNT);
+                    slice = rest;
+                    s.spawn(|| test_lut(&lut, start));
+                }
+            });
+        }
+        let elapsed_time = now.elapsed();
+
+        dbg!(randoms);
+        println!(
+            "Running {} iterations on {}, took {:?}",
+            AMOUNT,
+            threads,
+            elapsed_time / ITERATIONS
+        );
+        results.write_all(
+            format!("{}\t{}\n", threads, (elapsed_time / ITERATIONS).as_nanos()).as_bytes(),
+        )?;
     }
-    let elapsed_time = now.elapsed();
 
-    dbg!(randoms);
-    println!(
-        "Running {} iterations on {}, took {:?}",
-        AMOUNT,
-        threads,
-        elapsed_time / ITERATIONS
-    );
+    Ok(())
 }
 
 fn generate_lut() -> Array2<u16> {
