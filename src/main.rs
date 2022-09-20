@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     fs::File,
     io::{self, Read, Write},
-    path::Path,
     time::Instant,
 };
 
@@ -81,7 +80,7 @@ fn calc_offset(m: &Matrix) -> usize {
 
 fn canonicalize(m: &mut Matrix) {
     let i = calc_offset(m);
-    m.map_inplace(|c| *c = *c * PHASES[i])
+    m.map_inplace(|c| *c *= PHASES[i])
 }
 
 fn canonicalized(m: &Matrix) -> Matrix {
@@ -91,10 +90,7 @@ fn canonicalized(m: &Matrix) -> Matrix {
 
 fn dot(a: &Matrix, b: &Matrix) -> Matrix {
     let mul = a.dot(b);
-    debug_assert!(mul
-        .iter()
-        .find(|v| v.re % 2 != 0 || v.im % 2 != 0)
-        .is_none()); // There should be no odd numbers at this point
+    debug_assert!(!mul.iter().any(|v| v.re % 2 != 0 || v.im % 2 != 0)); // There should be no odd numbers at this point
     mul / 2
 }
 
@@ -206,14 +202,12 @@ fn generate_lut() -> Array2<u16> {
     let mut keys: Vec<_> = map.keys().collect();
     keys.sort_by_key(|m| map.get(m).unwrap());
 
-    let lut = Array2::from_shape_fn((len, len), |(i, j)| {
+    Array2::from_shape_fn((len, len), |(i, j)| {
         let mut m = dot(keys[i], keys[j]);
         canonicalize(&mut m);
         let id = map.get(&m).unwrap();
         *id as u16
-    });
-
-    lut
+    })
 }
 
 fn generate_map() -> HashMap<Matrix, usize> {
