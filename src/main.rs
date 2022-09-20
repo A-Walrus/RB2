@@ -1,7 +1,14 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{self, Read, Write},
+    path::Path,
+    time::Instant,
+};
 
 use ndarray::prelude::*;
-use num_complex::{Complex, Complex32};
+use num_complex::Complex;
+use rand::prelude::*;
 
 type Matrix = Array2<Complex<i8>>;
 // I
@@ -57,7 +64,30 @@ macro_rules! c {
     };
 }
 
-const ARR: [Complex<i8>; 4] = [c!(1), c!(-1), c!(i), c!(-i)];
+const PHASES: [Complex<i8>; 4] = [c!(1), c!(i), c!(-1), c!(-i)];
+
+fn calc_offset(m: &Matrix) -> usize {
+    let mut first_non_zero = *m
+        .iter()
+        .find(|c| **c != c!(0))
+        .expect("There should be atleat one non-zero value in Matrix");
+    let mut count = 0;
+    while !(first_non_zero.re >= 0 && first_non_zero.im > 0) {
+        first_non_zero *= c!(i);
+        count += 1;
+    }
+    count
+}
+
+fn canonicalize(m: &mut Matrix) {
+    let i = calc_offset(m);
+    m.map_inplace(|c| *c = *c * PHASES[i])
+}
+
+fn canonicalized(m: &Matrix) -> Matrix {
+    let i = calc_offset(m);
+    m.map(|c| c * PHASES[i])
+}
 
 fn dot(a: &Matrix, b: &Matrix) -> Matrix {
     let mul = a.dot(b);
@@ -69,37 +99,88 @@ fn dot(a: &Matrix, b: &Matrix) -> Matrix {
 }
 
 fn push(map: &mut HashMap<Matrix, usize>, key: &Matrix) -> bool {
-    let mut variants = variants(key);
-    let contains_variant = variants.any(|k| map.contains_key(&k));
-    if !contains_variant {
+    let canonical = canonicalized(key);
+    if !map.contains_key(&canonical) {
         let id = map.len();
-        map.insert(key.clone(), id);
+        map.insert(canonical, id);
         true
     } else {
         false
     }
 }
 
-fn variants(key: &Matrix) -> impl Iterator<Item = Matrix> {
-    let key = key.clone();
-    let variants = ARR.iter().map(move |s| key.map(|c| c * s));
-    variants
+fn test_lut(lut: &Array2<u16>) {
+    let mut rng = thread_rng();
+    let len = lut.len_of(Axis(0));
+    let iterator = std::iter::repeat_with(|| rng.gen_range(0..len));
+    const AMOUNT: usize = 1000;
+
+    let now = Instant::now();
+
+    let mut state: usize = 0;
+    for rand in iterator.take(AMOUNT) {
+        state = *(lut.get((state as usize, rand as usize)).unwrap()) as usize;
+    }
+
+    let elapsed_time = now.elapsed();
+    println!("Final state {}", state);
+    println!("Running {} iterations, took {:?}", AMOUNT, elapsed_time);
+}
+
+const PATH: &str = "lut";
+
+fn save_lut(lut: &Array2<u16>) -> io::Result<()> {
+    let slice = lut.as_slice().unwrap();
+    let byte_slice =
+        unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const u8, slice.len() * 2) };
+
+    let mut f = File::create(PATH)?;
+    f.write_all(byte_slice)?;
+
+    Ok(())
+}
+
+fn read_lut() -> io::Result<Array2<u16>> {
+    let mut f = File::open(PATH)?;
+    let mut vec = Vec::new();
+    f.read_to_end(&mut vec)?;
+    let slice = unsafe { std::slice::from_raw_parts(vec.as_ptr() as *const u16, vec.len() / 2) };
+    let len = 11520;
+    let vec = slice.to_vec();
+    let lut = Array2::from_shape_vec((len, len), vec).unwrap();
+
+    Ok(lut)
+}
+
+fn get_lut() -> Array2<u16> {
+    match read_lut() {
+        Ok(lut) => lut,
+        Err(_) => {
+            let lut = generate_lut();
+            save_lut(&lut).unwrap();
+            lut
+        }
+    }
 }
 
 fn main() {
-    let map = generate_map();
-    let lut = generate_lut(&map);
-    eprintln!("Done!");
+    let lut = get_lut();
+    eprintln!("Generated lookup table");
+
+    test_lut(&lut);
 }
 
-fn generate_lut(map: &HashMap<Matrix, usize>) -> Array2<u16> {
+fn generate_lut() -> Array2<u16> {
+    let map = generate_map();
+
     let len = map.len();
     let mut keys: Vec<_> = map.keys().collect();
     keys.sort_by_key(|m| map.get(m).unwrap());
 
     let lut = Array2::from_shape_fn((len, len), |(i, j)| {
-        let m = dot(keys[i], keys[j]);
-        let id = variants(&m).map(|m| map.get(&m)).find_map(|m| m).unwrap();
+        let mut m = dot(keys[i], keys[j]);
+        canonicalize(&mut m);
+        let id = map.get(&m).unwrap();
         *id as u16
     });
 
@@ -113,7 +194,7 @@ fn generate_map() -> HashMap<Matrix, usize> {
         sz2(),
         sx2(),
         cnot(),
-        // f
+        //
     ];
 
     let mut map = HashMap::new();
@@ -146,6 +227,7 @@ fn generate_map() -> HashMap<Matrix, usize> {
     map
 }
 
+#[allow(unused)]
 fn id() -> Matrix {
     Array2::from_diag_elem(4, 1.into()) * 2
 }
